@@ -90,7 +90,7 @@ class ProductionOpsEnvironment(
             difficulty=task_spec.difficulty,
             step_count=0,
             max_steps=task_spec.max_steps,
-            cumulative_reward=0.0,
+            cumulative_reward=self._normalize_public_score(0.0),
             incident_resolved=False,
             last_command="",
             command_history=[],
@@ -360,9 +360,14 @@ class ProductionOpsEnvironment(
             error=None,
             active_incidents=[task_spec.task_id],
             hint=self._build_hint(),
-            reward=0.0,
+            reward=self._normalize_public_score(0.0),
             done=False,
-            metadata={"event": "reset", "backend_mode": self._backend_mode},
+            metadata={
+                "event": "reset",
+                "backend_mode": self._backend_mode,
+                "reported_score": self._normalize_public_score(0.0),
+                "raw_cumulative_reward": 0.0,
+            },
         )
 
     def _build_step_observation(
@@ -427,7 +432,8 @@ class ProductionOpsEnvironment(
         return None
 
     def _normalize_public_score(self, raw_value: float) -> float:
-        return max(0.0, min(1.0, raw_value))
+        clamped = max(0.0, min(1.0, raw_value))
+        return 0.01 + (0.98 * clamped)
 
     def _build_reset_command_output(self, task_spec: TaskSpec) -> str:
         alert_body = task_spec.alert_message.replace("ALERT:", "", 1).strip()

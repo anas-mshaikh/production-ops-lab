@@ -108,7 +108,7 @@ class ProductionOpsState(State):
     )
     cumulative_reward: float = Field(
         default=0.0,
-        description="Normalized public score for the active episode, clamped to [0,1].",
+        description="Normalized public score for the active episode, reported strictly inside (0,1).",
     )
     incident_resolved: bool = Field(
         default=False,

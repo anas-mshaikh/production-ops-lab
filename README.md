@@ -127,7 +127,7 @@ The reward system is deterministic and workflow-shaped.
 - Correct fix actions are rewarded when they change system state sensibly.
 - Explicit verification is required before an episode can end in success.
 - Repeated or low-value commands are penalized.
-- Public reward is normalized to `[0,1]`.
+- Public task score is reported strictly inside `(0,1)` for validator compatibility.
 
 Success is grader-driven, not prompt-driven. Each task has explicit acceptance checks such as:
 
@@ -167,6 +167,12 @@ cd /Users/anasshaikh/Documents/Work/Hackathons/OpenEnv-hack/production_ops_lab
 HF_TOKEN=your_token_here python3 inference.py
 ```
 
+By default, the submission runner executes this 3-task triplet:
+
+- `app_service_stopped`
+- `bad_env_db_url`
+- `queue_backlog_due_to_worker_failure`
+
 Optional single-task examples:
 
 ```bash
@@ -191,7 +197,7 @@ Submission `inference.py` defaults:
 
 - `API_BASE_URL=https://router.huggingface.co/v1`
 - `MODEL_NAME=openai/gpt-oss-20b`
-- `TASK_ID=app_service_stopped`
+- `TASK_IDS=app_service_stopped,bad_env_db_url,queue_backlog_due_to_worker_failure`
 - `MAX_STEPS=6`
 - `TEMPERATURE=0.0`
 - `MAX_TOTAL_REWARD=1.0`
@@ -240,6 +246,5 @@ API_BASE_URL=https://router.huggingface.co/v1 \
 MODEL_NAME=openai/gpt-oss-20b \
 HF_TOKEN=your_token_here \
 ENV_BASE_URL=https://theRake-production-ops-lab.hf.space \
-TASK_ID=app_service_stopped \
 python3 inference.py
 ```

@@ -1,4 +1,4 @@
-"""Submission-oriented single-episode inference runner for Production Ops Lab."""
+"""Submission-oriented inference runner for Production Ops Lab."""
 
 from __future__ import annotations
 
@@ -52,6 +52,12 @@ POLICIES: Final[dict[str, list[str]]] = {
     ],
 }
 
+DEFAULT_TASK_IDS: Final[tuple[str, ...]] = (
+    "app_service_stopped",
+    "bad_env_db_url",
+    "queue_backlog_due_to_worker_failure",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class InferenceSettings:
@@ -59,11 +65,17 @@ class InferenceSettings:
     model_name: str
     hf_token: str
     env_base_url: str
-    task_id: str
+    task_ids: tuple[str, ...]
     max_steps: int
     temperature: float
     max_total_reward: float
     success_score_threshold: float
+
+
+def parse_task_ids(raw_value: str | None) -> tuple[str, ...]:
+    if raw_value is None:
+        return ()
+    return tuple(part.strip() for part in raw_value.split(",") if part.strip())
 
 
 def load_settings() -> InferenceSettings:
@@ -72,12 +84,18 @@ def load_settings() -> InferenceSettings:
     if not hf_token:
         raise RuntimeError("HF_TOKEN is required but was not set.")
 
+    task_id = os.getenv("TASK_ID")
+    if task_id and task_id.strip():
+        task_ids = (task_id.strip(),)
+    else:
+        task_ids = parse_task_ids(os.getenv("TASK_IDS")) or DEFAULT_TASK_IDS
+
     return InferenceSettings(
         api_base_url=os.getenv("API_BASE_URL", "https://router.huggingface.co/v1"),
         model_name=os.getenv("MODEL_NAME", "openai/gpt-oss-20b"),
         hf_token=hf_token,
         env_base_url=os.getenv("ENV_BASE_URL", "http://127.0.0.1:8000"),
-        task_id=os.getenv("TASK_ID", "app_service_stopped"),
+        task_ids=task_ids,
         max_steps=int(os.getenv("MAX_STEPS", "6")),
         temperature=float(os.getenv("TEMPERATURE", "0.0")),
         max_total_reward=float(os.getenv("MAX_TOTAL_REWARD", "1.0")),
@@ -181,19 +199,20 @@ def coerce_model_command(content: str | None, fallback: str) -> str:
 def get_model_message(
     llm_client: OpenAI,
     settings: InferenceSettings,
+    task_id: str,
     step: int,
     last_output: str,
     last_reward: float,
     history: list[str],
 ) -> str:
-    expected = get_expected_command(settings.task_id, step)
+    expected = get_expected_command(task_id, step)
     system_prompt = (
         "You are an on-call production engineer. "
         "Return exactly one production-ops command. No explanation. No markdown."
     )
     recent_history = "\n".join(history[-5:]) if history else "(none)"
     user_prompt = (
-        f"Task ID: {settings.task_id}\n"
+        f"Task ID: {task_id}\n"
         f"Step: {step}\n"
         f"Last reward: {last_reward:.2f}\n"
         f"Last output:\n{last_output}\n\n"
@@ -219,26 +238,25 @@ def get_model_message(
     return coerce_model_command(content, expected)
 
 
-def main() -> int:
-    settings = load_settings()
-    llm_client = OpenAI(
-        base_url=settings.api_base_url,
-        api_key=settings.hf_token,
-        timeout=5.0,
-    )
-
+def run_task_episode(
+    llm_client: OpenAI,
+    settings: InferenceSettings,
+    task_id: str,
+) -> bool:
     rewards: list[float] = []
     history: list[str] = []
     steps_taken = 0
-    score = 0.0
+    score = 0.01
     success = False
     env = None
+    result = None
+    final_state = None
 
-    log_start(task_id=settings.task_id)
+    log_start(task_id=task_id)
 
     try:
         env = ProductionOpsLabEnv(base_url=settings.env_base_url).sync()
-        result = env.reset(task_id=settings.task_id)
+        result = env.reset(task_id=task_id)
         last_output = extract_observation_text(result.observation)
         last_reward = float(result.reward or 0.0)
 
@@ -249,6 +267,7 @@ def main() -> int:
             message = get_model_message(
                 llm_client=llm_client,
                 settings=settings,
+                task_id=task_id,
                 step=step,
                 last_output=last_output,
                 last_reward=last_reward,
@@ -273,23 +292,55 @@ def main() -> int:
             if done:
                 break
 
-        if settings.max_total_reward > 0:
-            score = sum(rewards) / settings.max_total_reward
-        else:
-            score = 0.0
-        score = min(max(score, 0.0), 1.0)
-        success = score >= settings.success_score_threshold
-        return 0 if success else 1
+        if env is not None:
+            try:
+                final_state = env.state()
+            except Exception:
+                final_state = None
+
+        if final_state is not None:
+            score = float(getattr(final_state, "cumulative_reward", score))
+        elif rewards:
+            score = rewards[-1]
+        elif result is not None:
+            score = float(result.reward or score)
+
+        resolved = (
+            bool(getattr(final_state, "incident_resolved", False))
+            if final_state is not None
+            else bool(getattr(result, "done", False)) and score >= settings.success_score_threshold
+        )
+        success = resolved and score >= settings.success_score_threshold
+        return success
     except Exception:
         traceback.print_exc()
-        return 1
+        return False
     finally:
         try:
             if env is not None:
                 env.close()
-        except Exception as exc:
-            print(f"[DEBUG] env.close() error (container cleanup): {exc}", flush=True)
+        except Exception:
+            pass
         log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
+
+def main() -> int:
+    settings = load_settings()
+    llm_client = OpenAI(
+        base_url=settings.api_base_url,
+        api_key=settings.hf_token,
+        timeout=5.0,
+    )
+
+    all_success = True
+    for task_id in settings.task_ids:
+        task_success = run_task_episode(
+            llm_client=llm_client,
+            settings=settings,
+            task_id=task_id,
+        )
+        all_success = all_success and task_success
+    return 0 if all_success else 1
 
 
 if __name__ == "__main__":

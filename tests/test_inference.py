@@ -32,7 +32,7 @@ def _wait_for_server(base_url: str, timeout_s: float = 15.0) -> None:
     raise AssertionError(f"Server at {base_url} did not become ready in time.")
 
 
-def test_inference_script_runs_single_episode_with_submission_logs() -> None:
+def test_inference_script_runs_default_three_task_submission_flow() -> None:
     try:
         port = _get_free_port()
     except PermissionError as exc:
@@ -69,7 +69,6 @@ def test_inference_script_runs_single_episode_with_submission_logs() -> None:
             env={
                 **os.environ,
                 "ENV_BASE_URL": base_url,
-                "TASK_ID": "app_service_stopped",
                 "HF_TOKEN": "dummy-token",
                 "API_BASE_URL": "http://127.0.0.1:9/v1",
                 "MODEL_NAME": "openai/gpt-oss-20b",
@@ -90,15 +89,16 @@ def test_inference_script_runs_single_episode_with_submission_logs() -> None:
 
     assert stdout_lines[0].startswith("[START] task_id=")
     assert stdout_lines[-1].startswith("[END] success=")
-    assert sum(1 for line in stdout_lines if line.startswith("[START]")) == 1
-    assert sum(1 for line in stdout_lines if line.startswith("[END]")) == 1
-    assert sum(1 for line in stdout_lines if line.startswith("[STEP]")) >= 1
+    assert sum(1 for line in stdout_lines if line.startswith("[START]")) == 3
+    assert sum(1 for line in stdout_lines if line.startswith("[END]")) == 3
+    assert sum(1 for line in stdout_lines if line.startswith("[STEP]")) >= 3
     assert "TASK_START" not in result.stdout
     assert "TASK_END" not in result.stdout
     assert "BASELINE_COMPLETE" not in result.stdout
 
-    end_line = stdout_lines[-1]
-    match = re.search(r"score=([0-9]+\.[0-9]{2})", end_line)
-    assert match is not None
-    score = float(match.group(1))
-    assert 0.0 <= score <= 1.0
+    end_lines = [line for line in stdout_lines if line.startswith("[END]")]
+    for end_line in end_lines:
+        match = re.search(r"score=([0-9]+\.[0-9]{2})", end_line)
+        assert match is not None
+        score = float(match.group(1))
+        assert 0.0 < score < 1.0

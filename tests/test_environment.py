@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from production_ops_lab.inference import DEFAULT_TASK_IDS, POLICIES
 from production_ops_lab.models import (
     ProductionOpsLabAction,
     ProductionOpsLabObservation,
@@ -121,7 +122,7 @@ def test_tasks_require_explicit_verification_for_success(
 
     assert verify_observation.done is True
     assert env.state.incident_resolved is True
-    assert env.state.cumulative_reward > 0.0
+    assert 0.0 < env.state.cumulative_reward < 1.0
 
 
 def test_diagnostic_steps_hide_system_snapshot_and_fix_steps_refresh_it() -> None:
@@ -157,13 +158,13 @@ def test_repeated_commands_are_penalized_and_then_blocked() -> None:
     second = env.step(ProductionOpsLabAction(command="svc status nginx"))
     third = env.step(ProductionOpsLabAction(command="svc status nginx"))
 
-    assert first.reward == 0.0
-    assert second.reward == 0.0
-    assert third.reward == 0.0
+    assert first.reward == pytest.approx(0.01)
+    assert second.reward == pytest.approx(0.01)
+    assert third.reward == pytest.approx(0.01)
     assert first.metadata["raw_step_reward"] == -0.10
     assert second.metadata["raw_step_reward"] == pytest.approx(-0.20)
     assert third.metadata["raw_step_reward"] == pytest.approx(-0.50)
-    assert 0.0 <= first.metadata["reported_score"] <= 1.0
+    assert 0.0 < first.metadata["reported_score"] < 1.0
     assert third.error == "Repeated command blocked."
     assert third.command_output.startswith("BLOCKED:")
     assert env.state.incident_resolved is False
@@ -180,7 +181,8 @@ def test_timeout_ends_clearly_negative() -> None:
     assert observation is not None
     assert observation.done is True
     assert env.state.incident_resolved is False
-    assert env.state.cumulative_reward == 0.0
+    assert 0.0 < env.state.cumulative_reward < 1.0
+    assert env.state.cumulative_reward < 0.60
     assert env._completed_transcripts[-1].total_reward <= -0.25
 
 
@@ -228,22 +230,39 @@ def test_completed_episode_records_a_transcript_with_steps() -> None:
     assert transcript.resolved is True
     assert transcript.steps_used == 3
     assert transcript.steps
-    assert env.state.cumulative_reward == 1.0
+    assert env.state.cumulative_reward == pytest.approx(0.99)
     assert transcript.steps[0].phase == "triage"
     assert transcript.steps[-1].phase == "verification"
 
 
-def test_public_score_is_clamped_to_unit_interval() -> None:
+def test_public_score_is_strictly_inside_the_unit_interval() -> None:
     env = ProductionOpsEnvironment()
     env.reset(task_id="app_service_stopped")
     env.step(ProductionOpsLabAction(command="svc status app"))
     env.step(ProductionOpsLabAction(command="svc restart app"))
     observation = env.step(ProductionOpsLabAction(command="http check /health"))
 
-    assert 0.0 <= observation.reward <= 1.0
-    assert observation.reward == 1.0
-    assert 0.0 <= env.state.cumulative_reward <= 1.0
+    assert 0.0 < observation.reward < 1.0
+    assert observation.reward == pytest.approx(0.99)
+    assert 0.0 < env.state.cumulative_reward < 1.0
     assert observation.metadata["raw_cumulative_reward"] >= 1.0
+
+
+def test_default_submission_triplet_final_scores_are_strictly_inside_unit_interval() -> None:
+    env = ProductionOpsEnvironment()
+    try:
+        for task_id in DEFAULT_TASK_IDS:
+            observation = env.reset(task_id=task_id)
+            for command in POLICIES[task_id]:
+                observation = env.step(ProductionOpsLabAction(command=command))
+                if observation.done:
+                    break
+
+            assert observation.done is True
+            assert 0.0 < observation.reward < 1.0
+            assert 0.0 < env.state.cumulative_reward < 1.0
+    finally:
+        env.close()
 
 
 def test_scenario_selection_is_deterministic() -> None:
