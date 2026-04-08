@@ -94,7 +94,9 @@ def load_settings() -> InferenceSettings:
         api_base_url=os.getenv("API_BASE_URL", "https://router.huggingface.co/v1"),
         model_name=os.getenv("MODEL_NAME", "openai/gpt-oss-20b"),
         hf_token=hf_token,
-        env_base_url=os.getenv("ENV_BASE_URL", "http://127.0.0.1:8000"),
+        env_base_url=os.getenv(
+            "ENV_BASE_URL", "https://theRake-production-ops-lab.hf.space"
+        ),
         task_ids=task_ids,
         max_steps=int(os.getenv("MAX_STEPS", "6")),
         temperature=float(os.getenv("TEMPERATURE", "0.0")),
@@ -308,7 +310,8 @@ def run_task_episode(
         resolved = (
             bool(getattr(final_state, "incident_resolved", False))
             if final_state is not None
-            else bool(getattr(result, "done", False)) and score >= settings.success_score_threshold
+            else bool(getattr(result, "done", False))
+            and score >= settings.success_score_threshold
         )
         success = resolved and score >= settings.success_score_threshold
         return success
