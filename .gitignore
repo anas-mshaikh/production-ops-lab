@@ -1,0 +1,7 @@
+*__pycache__
+*.pyc
+*.env
+*.venv
+outputs/
+lab_target/monolith/.DS_Store
+lab_target/monolith/worker/.env.template

@@ -1,0 +1,101 @@
+name: production_ops_lab_monolith
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: production_ops
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d production_ops"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build: ./app
+    env_file:
+      - ./runtime/app.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "18081:8000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      app:
+        condition: service_started
+    ports:
+      - "18080:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  worker:
+    build: ./worker
+    env_file:
+      - ./runtime/worker.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  scheduler:
+    build: ./worker
+    command: ["python", "scheduler.py"]
+    env_file:
+      - ./runtime/worker.env
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  seed:
+    build: ./worker
+    profiles: ["tools"]
+    env_file:
+      - ./runtime/worker.env
+    volumes:
+      - ./seed:/seed:ro
+    command: ["python", "/seed/seed_data.py"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:

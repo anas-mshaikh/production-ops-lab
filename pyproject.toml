@@ -1,0 +1,46 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv-production_ops_lab"
+version = "0.1.0"
+description = "Production Ops Lab v1 foundation environment for OpenEnv"
+requires-python = ">=3.10"
+dependencies = [
+    "openenv-core[core]>=0.2.2",
+    "openai>=1.0.0",
+    "uvicorn>=0.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+server = "production_ops_lab.server.app:main"
+
+[tool.setuptools]
+include-package-data = true
+packages = [
+    "production_ops_lab",
+    "production_ops_lab.server",
+    "production_ops_lab.server.injectors",
+]
+
+[tool.setuptools.package-dir]
+"production_ops_lab" = "."
+"production_ops_lab.server" = "server"
+"production_ops_lab.server.injectors" = "server/injectors"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: server-backed or end-to-end integration tests",
+]

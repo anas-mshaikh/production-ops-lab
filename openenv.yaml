@@ -1,0 +1,7 @@
+spec_version: 1
+name: production_ops_lab
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+
